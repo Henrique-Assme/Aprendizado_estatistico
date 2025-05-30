@@ -247,34 +247,34 @@ class ARModel(nn.Module):
         _, h_n = self.rnn(x)
         return h_n[0]  # h_n shape: (1, batch_size, hidden_size)
 
-    def decode(self, h_n, target_seq_len):
-        """Decodes the sequence autoregressively."""
+    def decode(self, h_n, target_seq_len, y=None, teacher_forcing=False, teacher_forcing_ratio=1.0):
         batch_size = h_n.shape[0]
-        # Allocate memory for the output sequence
-        output_seq = torch.empty(
-            batch_size, target_seq_len, self.input_size, device=h_n.device
-        )
+        output_seq = torch.empty(batch_size, target_seq_len, self.input_size, device=h_n.device)
 
-        y_0 = self.linear(h_n)  # Project the last output of the encoder to input size
-
-        current_input = y_0
-
-        current_hidden = h_n.unsqueeze(0)  # Shape: (1, batch_size, hidden_size)
+        current_input = self.linear(h_n)  # y₀
+        current_hidden = h_n.unsqueeze(0)  # (1, batch, hidden)
 
         for i in range(target_seq_len):
-            # RNN expects input shape (batch, seq_len, features), seq_len is 1 here
             out, current_hidden = self.rnn(current_input.unsqueeze(1), current_hidden)
-            # Project the output of the RNN step to the input size
-            current_input = self.linear(out.squeeze(1))
-            # Store the prediction
-            output_seq[:, i] = current_input
+            prediction = self.linear(out.squeeze(1))
+            output_seq[:, i] = prediction
+
+            if teacher_forcing and y is not None and torch.rand(1).item() < teacher_forcing_ratio:
+                current_input = y[:, i]  # Use true value
+            else:
+                current_input = prediction  # Use model prediction
 
         return output_seq
 
-    def forward(self, x, target_seq_len):
-        """Forward pass: encode the past, decode the future."""
+    def forward(self, x, target_seq_len, y=None, teacher_forcing=False, teacher_forcing_ratio=1.0):
         h_n = self.encode(x)
-        output_seq = self.decode(h_n=h_n, target_seq_len=target_seq_len)
+        output_seq = self.decode(
+            h_n=h_n,
+            target_seq_len=target_seq_len,
+            y=y,
+            teacher_forcing=teacher_forcing,
+            teacher_forcing_ratio=teacher_forcing_ratio,
+        )
         return output_seq
 
 
@@ -287,10 +287,18 @@ def run_train_epoch(
     optimizer: optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
+    epoch: int,
+    num_epochs: int,
 ):
     model.train()
 
     progress_bar = tqdm(dataloader, desc="Training")
+    
+    # teacher_forcing_ratio = 1.0 # Start with full teacher forcing
+    # teacher_forcing_ratio = max(0.0, 1.0 - (epoch / num_epochs)) # Gradually decrease for curriculum learning
+    # teacher_forcing_ratio = max(0.0, 1.0/epoch) # Gradually decrease for curriculum learning
+    # teacher_forcing_ratio = max(0.0, np.exp(-0.1*epoch)) # Gradually decrease for curriculum learning
+    teacher_forcing_ratio = max(0.0, np.exp(-0.02*epoch)) # Gradually decrease for curriculum learning
 
     losses = []
     # Use enumerate to get batch index for plotting
@@ -301,7 +309,7 @@ def run_train_epoch(
 
         optimizer.zero_grad()
 
-        outputs = model(inputs, target_seq_len)
+        outputs = model(inputs, target_seq_len, y=targets, teacher_forcing=True, teacher_forcing_ratio=teacher_forcing_ratio)
 
         loss = criterion(outputs, targets)
 
@@ -478,6 +486,8 @@ def main(args):
             optimizer=optimizer,
             criterion=criterion,
             device=device,
+            epoch=epoch,
+            num_epochs=args.num_epochs,
         )
         train_losses.append(train_loss)
         print(f"Average Training Loss: {train_loss:.4f}")

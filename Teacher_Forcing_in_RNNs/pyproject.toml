@@ -1,0 +1,18 @@
+[project]
+name = "teacher-forcing-in-rnns"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib==3.8.2",
+    "polars==0.20.13",
+    "pytorch-lightning>=2.5.1.post0",
+    "pyyaml==6.0.1",
+    "torch==2.4",
+    "torchdiffeq>=0.2.5",
+    "torchdyn>=1.0.6",
+    "torchvision>=0.19.0",
+    "tqdm==4.66.1",
+    "uniplot==0.11.0",
+]
